@@ -6,14 +6,14 @@
 //! Authors:
 //!    Colton Loftus
 
-use atspi::MouseEvents;
+use atspi::{MouseEvents};
 use atspi_connection::set_session_accessibility;
 use atspi_proxies::{
 	accessible::{AccessibleProxy, ObjectRefExt},
 	proxy_ext::ProxyExt,
 };
 use futures_lite::stream::StreamExt;
-use std::error::Error;
+use std::{error::Error, thread::sleep, time::Duration};
 
 async fn get_text_in_app<'a>(
 	app: &'a AccessibleProxy<'a>,
@@ -49,7 +49,28 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
 	let mut events = atspi.event_stream();
 
+	let mut firefox: Option<AccessibleProxy> = None;
+
+	for app in apps.iter() {
+
+		let proxy = app.clone().into_accessible_proxy(conn).await?;
+		let natural_name = proxy.name().await?;
+		if "Firefox" == natural_name {
+			firefox = Some(proxy);
+			break;
+		}
+	}
+
+	let firefox = match firefox {
+		Some(firefox) => firefox,
+		None => panic!("Firefox not found"),
+	};
+
 	while let Some(ev) = events.next().await {
+
+		// doesn't work even if sleep is added to prevent too much throughput
+		// sleep(Duration::from_millis(100));
+
 		let ev = match ev {
 			Ok(ev) => ev,
 			Err(err) => {
@@ -66,19 +87,18 @@ async fn main() -> Result<(), Box<dyn Error>> {
 		let mouse_abs_ev = match mouse_ev {
 			atspi::MouseEvents::Abs(mouse_ev) => mouse_ev,
 			_ => continue,
+
 		};
 
-		for app in apps.iter() {
-			let app = app.clone().into_accessible_proxy(conn).await?;
-			match get_text_in_app(&app, conn, mouse_abs_ev.x, mouse_abs_ev.y).await {
-				Ok(text) => {
-					println!("Hovered text: {text}");
-				}
-				Err(err) => {
-					eprintln!("Error: {err}");
-				}
-			}
+		match get_text_in_app(&firefox, conn, mouse_abs_ev.x, mouse_abs_ev.y).await {
+			Ok(text) => println!("{text}"),
+			Err(err) => eprintln!("Error geting hovered text in firefox: {err}"),
 		}
+
+		// this also fails
+		// let text = mouse_abs_ev.item.into_accessible_proxy(conn).await?.proxies().await?.text().await?.get_text(0, i32::MAX).await?;
+		// print!("{text}");
+
 	}
 	Ok(())
 }
